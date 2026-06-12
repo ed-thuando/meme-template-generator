@@ -4,10 +4,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(serde::Deserialize)]
-pub struct SlotMeta {
-    #[serde(default)]
-    pub partition: Option<String>,
-    pub name: String,
+pub struct SheetRowInput {
+    pub partition: String,
+    pub partition_order: u32,
+    pub slot_name: String,
+    pub slot_order: u32,
     pub shape: String,
     pub x: f64,
     pub y: f64,
@@ -16,70 +17,114 @@ pub struct SlotMeta {
     pub angle: f64,
 }
 
+const SHEET_HEADER: &str =
+    "image_path,image_width,image_height,partition,partition_order,slot_name,slot_order,shape,x,y,width,height,angle";
+
 fn csv_escape(s: &str) -> String {
     s.replace('"', "\"\"")
 }
 
-/// Save the rendered meme PNG into `<output_dir>/images/<filename>` and append
-/// one row per slot to `<output_dir>/data.csv` (header written once). Returns
-/// the saved image path.
-fn export_meme_impl(
+fn write_origin_image(
+    images_dir: &Path,
+    origin_path: &str,
+    origin_base64: Option<&str>,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(images_dir).map_err(|e| format!("Failed to create output dir: {}", e))?;
+
+    if let Some(b64) = origin_base64 {
+        let payload = b64.rsplit(',').next().unwrap_or(b64);
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload)
+            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+        let filename = format!("origin-{}.png", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0));
+        let dest = images_dir.join(filename);
+        fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
+        return Ok(dest);
+    }
+
+    let src = PathBuf::from(origin_path);
+    if !src.exists() {
+        return Err(format!("Origin image not found: {}", origin_path));
+    }
+    let filename = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("origin.png");
+    let dest = images_dir.join(filename);
+    fs::copy(&src, &dest).map_err(|e| format!("Failed to copy origin image: {}", e))?;
+    Ok(dest)
+}
+
+/// Copy the origin image into `<output_dir>/images/` and append slot rows to
+/// `<output_dir>/sheet.csv` (header written once).
+fn export_template_sheet_impl(
     output_dir: &Path,
-    filename: &str,
-    image_base64: &str,
-    slots: &[SlotMeta],
+    origin_path: &str,
+    origin_base64: Option<&str>,
+    image_width: u32,
+    image_height: u32,
+    rows: &[SheetRowInput],
 ) -> Result<String, String> {
     let images_dir = output_dir.join("images");
-    fs::create_dir_all(&images_dir).map_err(|e| format!("Failed to create output dir: {}", e))?;
+    let saved = write_origin_image(&images_dir, origin_path, origin_base64)?;
+    let image_path_str = csv_escape(&saved.to_string_lossy());
 
-    // Accept either a raw base64 string or a full `data:...;base64,XXXX` URL.
-    let b64 = image_base64.rsplit(',').next().unwrap_or(image_base64);
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
-        .map_err(|e| format!("Failed to decode base64: {}", e))?;
-
-    let img_path = images_dir.join(filename);
-    fs::write(&img_path, &bytes).map_err(|e| format!("Failed to write image: {}", e))?;
-
-    let csv_path = output_dir.join("data.csv");
+    let csv_path = output_dir.join("sheet.csv");
     let mut content = String::new();
     if !csv_path.exists() {
-        content.push_str("image_path,partition,item_name,type,x,y,width,height,angle\n");
+        content.push_str(SHEET_HEADER);
+        content.push('\n');
     }
-    let img_path_str = csv_escape(&img_path.to_string_lossy());
-    for s in slots {
-        let partition = csv_escape(s.partition.as_deref().unwrap_or(""));
+    for row in rows {
         content.push_str(&format!(
-            "\"{}\",\"{}\",\"{}\",\"{}\",{:.4},{:.4},{:.4},{:.4},{:.4}\n",
-            img_path_str,
-            partition,
-            csv_escape(&s.name),
-            csv_escape(&s.shape),
-            s.x,
-            s.y,
-            s.width,
-            s.height,
-            s.angle,
+            "\"{}\",{}, {},\"{}\",{},\"{}\",{},\"{}\",{:.4},{:.4},{:.4},{:.4},{:.4}\n",
+            image_path_str,
+            image_width,
+            image_height,
+            csv_escape(&row.partition),
+            row.partition_order,
+            csv_escape(&row.slot_name),
+            row.slot_order,
+            csv_escape(&row.shape),
+            row.x,
+            row.y,
+            row.width,
+            row.height,
+            row.angle,
         ));
     }
-    let mut f = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&csv_path)
-        .map_err(|e| format!("Failed to open csv: {}", e))?;
-    f.write_all(content.as_bytes())
-        .map_err(|e| format!("Failed to append csv: {}", e))?;
+    if !content.is_empty() {
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&csv_path)
+            .map_err(|e| format!("Failed to open sheet.csv: {}", e))?;
+        f.write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to append sheet.csv: {}", e))?;
+    }
 
-    Ok(img_path.to_string_lossy().to_string())
+    Ok(saved.to_string_lossy().to_string())
 }
 
 #[command]
-pub fn export_meme(
+pub fn export_template_sheet(
     output_dir: String,
-    filename: String,
-    image_base64: String,
-    slots: Vec<SlotMeta>,
+    origin_path: String,
+    origin_base64: Option<String>,
+    image_width: u32,
+    image_height: u32,
+    rows: Vec<SheetRowInput>,
 ) -> Result<String, String> {
-    export_meme_impl(&PathBuf::from(output_dir), &filename, &image_base64, &slots)
+    export_template_sheet_impl(
+        &PathBuf::from(output_dir),
+        &origin_path,
+        origin_base64.as_deref(),
+        image_width,
+        image_height,
+        &rows,
+    )
 }
 
 #[command]
@@ -138,13 +183,15 @@ fn extension_to_mime(path: &str) -> &'static str {
 mod tests {
     use super::*;
 
-    // 1x1 transparent PNG, base64.
     const PNG_B64: &str =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-    fn meta(name: &str) -> SlotMeta {
-        SlotMeta {
-            name: name.into(),
+    fn row(name: &str, partition: &str) -> SheetRowInput {
+        SheetRowInput {
+            partition: partition.into(),
+            partition_order: 1,
+            slot_name: name.into(),
+            slot_order: 1,
             shape: "rectangle".into(),
             x: 10.0,
             y: 20.0,
@@ -155,26 +202,43 @@ mod tests {
     }
 
     #[test]
-    fn writes_image_and_appends_csv_with_header_once() {
-        let dir = std::env::temp_dir().join(format!("meme-test-{}", std::process::id()));
+    fn copies_origin_and_appends_sheet_with_header_once() {
+        let dir = std::env::temp_dir().join(format!("meme-sheet-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
+        let src = dir.join("src.png");
+        fs::create_dir_all(&dir).unwrap();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, PNG_B64).unwrap();
+        fs::write(&src, &bytes).unwrap();
 
-        let saved = export_meme_impl(&dir, "a.png", PNG_B64, &[meta("Cup"), meta("Coach")]).unwrap();
+        let saved = export_template_sheet_impl(
+            &dir,
+            &src.to_string_lossy(),
+            None,
+            1200,
+            800,
+            &[row("Team A", "Match 1"), row("Team B", "Match 1")],
+        )
+        .unwrap();
         assert!(PathBuf::from(&saved).exists());
-        assert!(saved.ends_with("a.png"));
 
-        // Second export appends, no duplicate header.
-        export_meme_impl(&dir, "b.png", &format!("data:image/png;base64,{}", PNG_B64), &[meta("Flag")]).unwrap();
+        export_template_sheet_impl(
+            &dir,
+            &src.to_string_lossy(),
+            None,
+            1200,
+            800,
+            &[row("Team C", "Match 2")],
+        )
+        .unwrap();
 
-        let csv = fs::read_to_string(dir.join("data.csv")).unwrap();
+        let csv = fs::read_to_string(dir.join("sheet.csv")).unwrap();
         let lines: Vec<&str> = csv.lines().collect();
-        assert_eq!(lines[0], "image_path,partition,item_name,type,x,y,width,height,angle");
-        // header + 2 rows (first export) + 1 row (second export) = 4 lines.
+        assert_eq!(lines[0], SHEET_HEADER);
         assert_eq!(lines.len(), 4);
-        assert_eq!(lines.iter().filter(|l| l.contains("item_name")).count(), 1);
-        assert!(lines[1].contains("\"Cup\""));
-        assert!(lines[3].contains("\"Flag\""));
-        assert!(lines[1].contains("45.0000"));
+        assert!(lines[1].contains("\"Team A\""));
+        assert!(lines[1].contains("\"Match 1\""));
+        assert!(lines[1].contains("1200"));
+        assert!(lines[3].contains("\"Team C\""));
 
         let _ = fs::remove_dir_all(&dir);
     }

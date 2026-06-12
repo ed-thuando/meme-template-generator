@@ -18,9 +18,11 @@ export async function saveFile(path: string, data: string): Promise<void> {
   return invokeCommand<void>("save_file", { path, data });
 }
 
-export interface SlotMeta {
-  partition?: string;
-  name: string;
+export interface SheetRowInput {
+  partition: string;
+  partitionOrder: number;
+  slotName: string;
+  slotOrder: number;
   shape: string;
   x: number;
   y: number;
@@ -29,17 +31,32 @@ export interface SlotMeta {
   angle: number;
 }
 
-export async function exportMeme(
+export async function exportTemplateSheet(
   outputDir: string,
-  filename: string,
-  imageBase64: string,
-  slots: SlotMeta[]
+  originPath: string,
+  originBase64: string | null,
+  imageWidth: number,
+  imageHeight: number,
+  rows: SheetRowInput[]
 ): Promise<string> {
-  return invokeCommand<string>("export_meme", {
+  return invokeCommand<string>("export_template_sheet", {
     outputDir,
-    filename,
-    imageBase64,
-    slots,
+    originPath,
+    originBase64,
+    imageWidth,
+    imageHeight,
+    rows: rows.map((r) => ({
+      partition: r.partition,
+      partition_order: r.partitionOrder,
+      slot_name: r.slotName,
+      slot_order: r.slotOrder,
+      shape: r.shape,
+      x: r.x,
+      y: r.y,
+      width: r.width,
+      height: r.height,
+      angle: r.angle,
+    })),
   });
 }
 

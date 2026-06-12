@@ -66,7 +66,7 @@ test("full flow: image -> partition -> slot -> text -> undo -> export", async ({
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export" }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/\.png$/);
+  expect(download.suggestedFilename()).toMatch(/sheet\.csv$/);
 
   expect(errors).toEqual([]);
 });
