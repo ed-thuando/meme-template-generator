@@ -3,8 +3,7 @@ import EmptyState from "./components/EmptyState";
 import MemeCanvas from "./components/MemeCanvas";
 import SlotPanel from "./components/SlotPanel";
 import { useStore } from "./store";
-import { useEffect, useRef } from "react";
-import type { MemeCanvasHandle } from "./components/MemeCanvas";
+import { useEffect } from "react";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -17,7 +16,6 @@ function App() {
   const loadImage = useStore((s) => s.loadTemplate);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
-  const canvasRef = useRef<MemeCanvasHandle>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -65,11 +63,11 @@ function App() {
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
-      <Toolbar canvasRef={canvasRef} />
+      <Toolbar />
       <div className="flex-1 flex overflow-hidden">
         {template ? (
           <>
-            <MemeCanvas ref={canvasRef} />
+            <MemeCanvas />
             <SlotPanel />
           </>
         ) : (

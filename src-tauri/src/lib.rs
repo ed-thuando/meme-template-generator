@@ -10,7 +10,7 @@ pub fn run() {
             commands::save_json,
             commands::save_file,
             commands::get_image_dimensions,
-            commands::export_meme,
+            commands::export_template_sheet,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

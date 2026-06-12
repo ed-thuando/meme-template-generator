@@ -1,6 +1,6 @@
 [package]
 name = "meme-generator"
-version = "0.1.0"
+version = "1.0.0"
 description = "Meme Generator - WC2026 meme template tool"
 authors = ["you"]
 edition = "2021"

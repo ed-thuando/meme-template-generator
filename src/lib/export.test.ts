@@ -3,6 +3,9 @@ import {
   exportMemeSheet,
   slotsFromSheet,
   partitionsFromSheet,
+  buildSheetRows,
+  sheetRowsToCsv,
+  SHEET_CSV_HEADER,
   percentageToPixel,
   pixelToPercentage,
 } from "../lib/export";
@@ -21,6 +24,64 @@ function createTemplate(overrides: Partial<MemeTemplate> = {}): MemeTemplate {
     ...overrides,
   };
 }
+
+describe("buildSheetRows", () => {
+  it("flattens partitions and slots with coordinates", () => {
+    const slot: Slot = {
+      id: "s1",
+      order: 1,
+      x: 10,
+      y: 20,
+      width: 12,
+      height: 12,
+      shape: "head",
+      label: "Team A",
+      rotation: 30,
+    };
+    const template = createTemplate({
+      partitions: [{ id: "p1", order: 1, label: "Match 1", slots: [slot] }],
+    });
+
+    const rows = buildSheetRows(template);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].partition).toBe("Match 1");
+    expect(rows[0].slotName).toBe("Team A");
+    expect(rows[0].x).toBe(10);
+    expect(rows[0].angle).toBe(30);
+  });
+
+  it("renders csv with image dimensions", () => {
+    const template = createTemplate({
+      imageWidth: 1920,
+      imageHeight: 1080,
+      partitions: [
+        {
+          id: "p1",
+          order: 1,
+          label: "Part 1",
+          slots: [
+            {
+              id: "s1",
+              order: 1,
+              x: 5,
+              y: 5,
+              width: 10,
+              height: 10,
+              shape: "rectangle",
+              label: "Slot 1",
+              rotation: 0,
+            },
+          ],
+        },
+      ],
+    });
+    const csv = sheetRowsToCsv("meme.png", template, buildSheetRows(template));
+    expect(csv.startsWith(SHEET_CSV_HEADER)).toBe(true);
+    expect(csv).toContain('"meme.png"');
+    expect(csv).toContain("1920");
+    expect(csv).toContain('"Part 1"');
+  });
+});
 
 describe("exportMemeSheet", () => {
   it("exports a valid MemeSheet from a single template", () => {

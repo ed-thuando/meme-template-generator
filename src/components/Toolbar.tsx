@@ -1,8 +1,13 @@
-import { useStore, allSlots } from "../store";
+import { useStore } from "../store";
 import { getImageDimensions } from "../lib/tauri";
+import {
+  buildSheetRows,
+  sheetRowsToCsv,
+  downloadBlob,
+  dataUrlToBlob,
+  originFilename,
+} from "../lib/export";
 import { useState } from "react";
-import type { RefObject } from "react";
-import type { MemeCanvasHandle } from "./MemeCanvas";
 
 function isTauri(): boolean {
   return !!(window as any).__TAURI_INTERNALS__;
@@ -20,7 +25,7 @@ async function openImageDialog(): Promise<string | null> {
   return selected as string | null;
 }
 
-function Toolbar({ canvasRef }: { canvasRef: RefObject<MemeCanvasHandle | null> }) {
+function Toolbar() {
   const loadTemplate = useStore((s) => s.loadTemplate);
   const reset = useStore((s) => s.reset);
   const template = useStore((s) => s.template);
@@ -60,33 +65,31 @@ function Toolbar({ canvasRef }: { canvasRef: RefObject<MemeCanvasHandle | null> 
   }
 
   async function handleExport() {
-    if (!canvasRef.current) return;
+    if (!template) return;
     try {
-      const dataUrl = await canvasRef.current.exportImage("png", 1);
+      const rows = buildSheetRows(template);
+      const isDataUrl = template.imagePath.startsWith("data:");
+
       if (isTauri()) {
-        // Desktop: save PNG into <Downloads>/meme-output/images and append a row
-        // per slot (position/size/angle) to <Downloads>/meme-output/data.csv.
         const { downloadDir, join } = await import("@tauri-apps/api/path");
         const outputDir = await join(await downloadDir(), "meme-output");
-        const filename = `meme-${Date.now()}.png`;
-        const slots = (template ? allSlots(template) : []).map(({ partition, slot: s }) => ({
-          partition: partition.label,
-          name: s.label,
-          shape: s.shape,
-          x: s.x,
-          y: s.y,
-          width: s.width,
-          height: s.height,
-          angle: s.rotation,
-        }));
-        const { exportMeme } = await import("../lib/tauri");
-        const savedPath = await exportMeme(outputDir, filename, dataUrl, slots);
-        setExportMsg(`Saved: ${savedPath}`);
+        const { exportTemplateSheet } = await import("../lib/tauri");
+        const savedPath = await exportTemplateSheet(
+          outputDir,
+          isDataUrl ? "" : template.imagePath,
+          isDataUrl ? template.imagePath : null,
+          template.imageWidth,
+          template.imageHeight,
+          rows
+        );
+        setExportMsg(`Origin + ${rows.length} row(s) → sheet.csv · ${savedPath}`);
       } else {
-        const link = document.createElement("a");
-        link.href = dataUrl;
-        link.download = "meme.png";
-        link.click();
+        const imageName = originFilename(template.imagePath);
+        const blob = await dataUrlToBlob(template.imagePath);
+        downloadBlob(imageName, blob);
+        const csv = sheetRowsToCsv(imageName, template, rows);
+        downloadBlob("sheet.csv", new Blob([csv], { type: "text/csv" }));
+        setExportMsg(`Downloaded origin + sheet.csv (${rows.length} row(s))`);
       }
     } catch (err) {
       console.error("Failed to export:", err);
